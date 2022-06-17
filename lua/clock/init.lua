@@ -7,20 +7,21 @@ local api = vim.api
 
 local numbers = require('clock.numbers')
 
+local padding = ' '
 local chars = {
   [1] = '█',
 }
 
 local config = (function()
-  local padding = string.rep(' ', 5)
+  local block = string.rep(padding, 5)
   return {
     border = 'rounded',
     separator = {
-      padding,
-      ' ' .. chars[1]:rep(2) .. '  ',
-      padding,
-      ' ' .. chars[1]:rep(2) .. '  ',
-      padding,
+      block,
+      padding .. chars[1]:rep(2) .. padding:rep(2),
+      block,
+      padding .. chars[1]:rep(2) .. padding:rep(2),
+      block,
     },
   }
 end)()
@@ -43,6 +44,8 @@ local join = function(opts)
   return result
 end
 
+---@param str string
+---@return string[]
 local split = function(str)
   return vim.split(str, '\n')
 end
@@ -55,52 +58,70 @@ local str_to_time_parts = function(time)
   return h1, h2, m1, m2, s1, s2
 end
 
+---Converts a string into an array of said string `size` number of times
+---@param str string
+---@param size number
+---@return string[]
+local function expand(str, size)
+  local res = {}
+  for i = 1, size, 1 do
+    res[#res + 1] = str
+  end
+  return res
+end
+
 --- Takes a time represented as HH:MM and returns a list of lines to render in the buffer
 ---@param time string
 ---@param width number
 ---@return string[]
 local function get_lines(time, width)
   local sep = config.separator
+  local inner_padding_width = 2
 
   local h1, h2, m1, m2, s1, s2 = str_to_time_parts(time)
   local hour1 = split(numbers[h1 + 1])
-  local clock_width = api.nvim_strwidth(hour1[1]) * 4
-  local available_space = width - clock_width
-  local side_padding = math.floor(available_space / 2)
+  local char_width = api.nvim_strwidth(hour1[1])
+  local sep_width = api.nvim_strwidth(sep[1])
+  local clock_width = (char_width * 6) + (sep_width * 2)
+  local inner_padding = expand(padding:rep(inner_padding_width), char_width)
+  -- 4 is for padding between time parts each of which has 2 characters
+  local available_space = width - clock_width - (5 * inner_padding_width)
+  local side_size = math.floor(available_space / 2)
 
-  local padding = vim.split(string.rep(' ', side_padding), '')
+  ---@type string[]
+  local side_padding = expand(padding:rep(side_size), char_width)
 
   local h1_lines = join({
-    before = padding,
+    before = side_padding,
     list = hour1,
-    after = padding,
+    after = inner_padding,
   })
 
   local h2_lines = join({
     list = split(numbers[h2 + 1]),
-    after = padding,
+    after = inner_padding,
   })
 
   local m1_lines = join({
     before = sep,
     list = split(numbers[m1 + 1]),
-    after = padding,
+    after = inner_padding,
   })
 
   local m2_lines = join({
     list = split(numbers[m2 + 1]),
-    after = padding,
+    after = inner_padding,
   })
 
   local s1_lines = join({
     before = sep,
     list = split(numbers[s1 + 1]),
-    after = padding,
+    after = inner_padding,
   })
 
   local s2_lines = join({
     list = split(numbers[s2 + 1]),
-    after = padding,
+    after = side_padding,
   })
 
   local result = {}
@@ -198,7 +219,7 @@ local function create_counter(duration, direction)
     local hours = duration.hours or 0
     local seconds = (minutes * 60) + (hours * 60 * 60)
     local deadline = seconds + os.time()
-    local start_time = countdown(deadline)
+    local start_time = '00:00:00'
     local win, buf = draw_clock(start_time, config)
     local timer = start_timer(deadline, function(timer)
       update_clock(countdown(deadline), win, buf, timer)
