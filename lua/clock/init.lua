@@ -206,8 +206,13 @@ local function start_timer(deadline, callback)
   end)
 end
 
-local countdown = function(deadline, _)
-  return os.date('%X', deadline - os.time())
+--- Return the difference between the time when the timer ends and the current time
+-- `!` means UTC and `%X` returns the time as `HH:MM`
+-- @see: https://www.lua.org/pil/22.1.html
+---@param deadline number time when the timer ends in seconds
+---@return number difference between now and the end time
+local countdown = function(deadline)
+  return os.date('!%X', deadline - os.time())
 end
 
 ---@param duration Duration
