@@ -6,21 +6,21 @@ local api = vim.api
 ---@field minutes number
 
 local numbers = require('clock.numbers')
+local PADDING = ' '
 
-local padding = ' '
 local chars = {
   [1] = '█',
 }
 
 local config = (function()
-  local block = string.rep(padding, 5)
+  local block = string.rep(PADDING, 5)
   return {
     border = 'rounded',
     separator = {
       block,
-      padding .. chars[1]:rep(2) .. padding:rep(2),
+      PADDING .. chars[1]:rep(2) .. PADDING:rep(2),
       block,
-      padding .. chars[1]:rep(2) .. padding:rep(2),
+      PADDING .. chars[1]:rep(2) .. PADDING:rep(2),
       block,
     },
   }
@@ -83,13 +83,13 @@ local function get_lines(time, width)
   local char_width = api.nvim_strwidth(hour1[1])
   local sep_width = api.nvim_strwidth(sep[1])
   local clock_width = (char_width * 6) + (sep_width * 2)
-  local inner_padding = expand(padding:rep(inner_padding_width), char_width)
+  local inner_padding = expand(PADDING:rep(inner_padding_width), char_width)
   -- 4 is for padding between time parts each of which has 2 characters
   local available_space = width - clock_width - (5 * inner_padding_width)
   local side_size = math.floor(available_space / 2)
 
   ---@type string[]
-  local side_padding = expand(padding:rep(side_size), char_width)
+  local side_padding = expand(PADDING:rep(side_size), char_width)
 
   local h1_lines = join({
     before = side_padding,
