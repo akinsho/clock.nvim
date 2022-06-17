@@ -5,6 +5,13 @@ local api = vim.api
 ---@field hours number
 ---@field minutes number
 
+---@class Direction
+---@field UP 1
+---@field DOWN 2
+
+---@type Direction
+local direction = { UP = 1, DOWN = 2 }
+
 local numbers = require('clock.numbers')
 local PADDING = ' '
 
@@ -190,12 +197,13 @@ local timers = {}
 
 ---@param deadline number
 ---@param callback fun(userdata, number)
-local function start_timer(deadline, callback)
+---@param stop_condition fun(timer): boolean
+local function start_timer(deadline, callback, stop_condition)
   assert(callback, 'A callback must be passed to a timer')
   local timer = vim.loop.new_timer()
   timers[timer] = deadline
   timer:start(0, 1000, function()
-    if timers[timer] <= os.time() then
+    if stop_condition(timer) then
       timer:stop()
       timer:close()
       timer = nil
@@ -209,26 +217,39 @@ end
 --- Return the difference between the time when the timer ends and the current time
 -- `!` means UTC and `%X` returns the time as `HH:MM`
 -- @see: https://www.lua.org/pil/22.1.html
----@param deadline number time when the timer ends in seconds
+---@param end_time number time when the timer ends in seconds
 ---@return number difference between now and the end time
-local countdown = function(deadline)
-  return os.date('!%X', deadline - os.time())
+local function countdown(end_time)
+  return os.date('!%X', end_time - os.time())
+end
+
+local function countup(end_time, duration)
+  return os.date('!%X', (os.time() + duration) - end_time)
 end
 
 ---@param duration Duration
----@param direction number
+---@param dir Direction
 ---@return fun(userdata)
-local function create_counter(duration, direction)
+local function create_counter(duration, dir)
   vim.schedule(function()
+    local is_counting_up = dir == direction.UP
     local minutes = duration.minutes or 0
     local hours = duration.hours or 0
     local seconds = (minutes * 60) + (hours * 60 * 60)
-    local deadline = seconds + os.time()
     local start_time = '00:00:00'
     local win, buf = draw_clock(start_time, config)
-    local timer = start_timer(deadline, function(timer)
-      update_clock(countdown(deadline), win, buf, timer)
-    end)
+    local deadline = seconds + os.time()
+    local getter = is_counting_up and countup or countdown
+    local condition = function(_)
+      if is_counting_up then
+        return deadline <= os.time()
+      end
+      return deadline <= os.time()
+    end
+    local updater = function(t)
+      update_clock(getter(deadline, seconds), win, buf, t)
+    end
+    local timer = start_timer(deadline, updater, condition)
     return function()
       if timer then
         timer:stop()
@@ -255,8 +276,6 @@ local function add_clock(clock)
   return true
 end
 
-local direction = { UP = 1, DOWN = 2 }
-
 --- @class Clock
 local Clock = {}
 function Clock:new(o)
@@ -273,6 +292,17 @@ function Clock:count_down(duration)
   local exists = add_clock(self)
   if not exists then
     self.cancel = create_counter(duration, direction.DOWN)
+  end
+  return self
+end
+
+---Count up for the amount of time specified
+---@param duration Duration
+---@return Clock
+function Clock:count_up(duration)
+  local exists = add_clock(self)
+  if not exists then
+    self.cancel = create_counter(duration, direction.UP)
   end
   return self
 end
