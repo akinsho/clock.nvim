@@ -1,6 +1,10 @@
 local M = {}
 local api = vim.api
 
+---@class Duration
+---@field hours number
+---@field minutes number
+
 local numbers = require('clock.numbers')
 
 local chars = {
@@ -43,19 +47,32 @@ local split = function(str)
   return vim.split(str, '\n')
 end
 
+local str_to_time_parts = function(time)
+  local hr, min, sec = unpack(vim.split(time, ':'))
+  local h1, h2 = unpack(vim.split(hr, ''))
+  local m1, m2 = unpack(vim.split(min, ''))
+  local s1, s2 = unpack(vim.split(sec, ''))
+  return h1, h2, m1, m2, s1, s2
+end
+
 --- Takes a time represented as HH:MM and returns a list of lines to render in the buffer
----@param h1 number
----@param h2 number
----@param m1 number
----@param m2 number
+---@param time string
+---@param width number
 ---@return string[]
-local function get_lines(h1, h2, m1, m2)
+local function get_lines(time, width)
   local sep = config.separator
-  local padding = vim.split(string.rep(' ', 5), '')
+
+  local h1, h2, m1, m2, s1, s2 = str_to_time_parts(time)
+  local hour1 = split(numbers[h1 + 1])
+  local clock_width = api.nvim_strwidth(hour1[1]) * 4
+  local available_space = width - clock_width
+  local side_padding = math.floor(available_space / 2)
+
+  local padding = vim.split(string.rep(' ', side_padding), '')
 
   local h1_lines = join({
     before = padding,
-    list = split(numbers[h1 + 1]),
+    list = hour1,
     after = padding,
   })
 
@@ -75,16 +92,43 @@ local function get_lines(h1, h2, m1, m2)
     after = padding,
   })
 
+  local s1_lines = join({
+    before = sep,
+    list = split(numbers[s1 + 1]),
+    after = padding,
+  })
+
+  local s2_lines = join({
+    list = split(numbers[s2 + 1]),
+    after = padding,
+  })
+
   local result = {}
   for i, _ in ipairs(h1_lines) do
-    table.insert(result, table.concat({ h1_lines[i], h2_lines[i], m1_lines[i], m2_lines[i] }))
+    table.insert(
+      result,
+      table.concat({
+        h1_lines[i],
+        h2_lines[i],
+        m1_lines[i],
+        m2_lines[i],
+        s1_lines[i],
+        s2_lines[i],
+      })
+    )
   end
   return result
 end
 
-local draw_clock = function(conf)
+--- Create a clock window
+---@param time string
+---@param conf table
+---@return number window
+---@return number buf
+local draw_clock = function(time, conf)
+  local width = conf.width or 60
   local buf = api.nvim_create_buf(false, true)
-  local lines = get_lines(1, 2, 3, 0)
+  local lines = get_lines(time, width)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   local win = api.nvim_open_win(buf, false, {
     relative = 'editor',
@@ -93,30 +137,47 @@ local draw_clock = function(conf)
     col = vim.o.columns,
     border = conf.border,
     height = conf.height or #lines,
-    width = conf.width or 40,
+    width = width,
     style = 'minimal',
   })
   return win, buf
 end
 
-local update_clock = function(time, _, buf)
-  local hr, min = unpack(vim.split(time, ':'))
-  local h1, h2 = unpack(vim.split(hr, ''))
-  local m1, m2 = unpack(vim.split(min, ''))
-  local lines = get_lines(h1, h2, m1, m2)
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+--- Set a new time in an existing clock buffer
+---@param time string
+---@param win number
+---@param buf number
+---@param timer userdata
+local update_clock = function(time, win, buf, timer)
+  if not api.nvim_win_is_valid(win) then
+    return vim.notify_once('Window is invalid! cannot update the time', 'error', {
+      title = 'Clock.nvim',
+    })
+  end
+  if not timer then
+    api.nvim_win_close(win, true)
+    api.nvim_buf_delete(buf, { force = true })
+  else
+    ---@type table
+    local win_config = api.nvim_win_get_config(win)
+    local lines = get_lines(time, win_config.width)
+    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  end
 end
 
 local timers = {}
 
-local function start_timer(duration, callback)
+---@param deadline number
+---@param callback fun(userdata, number)
+local function start_timer(deadline, callback)
   assert(callback, 'A callback must be passed to a timer')
   local timer = vim.loop.new_timer()
-  timers[timer] = os.time() + duration
+  timers[timer] = deadline
   timer:start(0, 1000, function()
     if timers[timer] <= os.time() then
+      timer:stop()
       timer:close()
-      timer:close()
+      timer = nil
     end
     vim.schedule(function()
       callback(timer)
@@ -124,42 +185,72 @@ local function start_timer(duration, callback)
   end)
 end
 
-local function start_clock()
-  local win, buf = draw_clock(config)
-  update_clock(os.date('%X', os.time()), win, buf)
+local countdown = function(deadline, _)
+  return os.date('%X', deadline - os.time())
 end
 
----@param duration number
-local function create_clock_timer(duration)
-  start_timer(duration, start_clock)
+---@param duration Duration
+---@param direction number
+---@return fun(userdata)
+local function create_counter(duration, direction)
+  vim.schedule(function()
+    local minutes = duration.minutes or 0
+    local hours = duration.hours or 0
+    local seconds = (minutes * 60) + (hours * 60 * 60)
+    local deadline = seconds + os.time()
+    local start_time = countdown(deadline)
+    local win, buf = draw_clock(start_time, config)
+    local timer = start_timer(deadline, function(timer)
+      update_clock(countdown(deadline), win, buf, timer)
+    end)
+    return function()
+      if timer then
+        timer:stop()
+        timer:close()
+      end
+    end
+  end)
 end
 
---- @class Timer
---- @field directory string
---- @field duration number
---- @field condition fun(): boolean
-local Timer = {}
+---@type Clock[]
+local clocks = {}
 
-function Timer:new(o)
-  o = o or {}
-  self.__index = self
-  o.duration = o.duration or 15000
-  return setmetatable(o, self)
+local function next_id()
+  return #clocks + 1
 end
+
+---@param clock Clock
+---@return boolean exists
+local function add_clock(clock)
+  if not vim.tbl_contains(clocks, clock) then
+    clocks[#clocks + 1] = clock
+    return false
+  end
+  return true
+end
+
+local direction = { UP = 1, DOWN = 2 }
 
 --- @class Clock
 local Clock = {}
 function Clock:new(o)
   o = o or {}
+  self.id = next_id()
   self.__index = self
   return setmetatable(o, self)
 end
 
-function Timer:start()
-  create_clock_timer(self.duration)
+---Countdown for the amount of time specified
+---@param duration Duration
+---@return Clock
+function Clock:count_down(duration)
+  local exists = add_clock(self)
+  if not exists then
+    self.cancel = create_counter(duration, direction.DOWN)
+  end
+  return self
 end
 
-M.Timer = Timer
 M.Clock = Clock
 
 function M.setup(c)
