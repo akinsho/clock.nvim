@@ -12,7 +12,7 @@ _Highly_ Unstable
 ## Planned features
 
 - [ ] Pomodoro timer
-- [ ] More clock styles (as the desire arises)
+- [ ] More clock styles (as the desire arises, not on demand)
 - [ ] Clock colour effects e.g. as the deadline approaches etc.
 
 ## Installation
@@ -36,8 +36,8 @@ thirty_mins:count_up() -- thirty_mins:count_down()
 
 ## Feature requests / Issues
 
-This plugin was mainly designed for my usage/use cases, I don't intend to implement a bunch of feature requests. I only plan on working on what I have stated already.
+This plugin was designed for my usage/use cases, I don't intend to implement feature requests. I only plan on working on what I have stated already.
 If it does not work for you I also do not intend to provide customer support so please try and solve any configuration issues yourself.
 Please do not raise issues like `How do I do X?`.
 
-If you have an idea you would like to contribute please raise a PR 🥇.
+I am always happy to accept contributions so if you have an idea you would like to contribute please raise a PR 🥇.
