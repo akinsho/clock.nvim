@@ -2,7 +2,12 @@ local M = {}
 local api = vim.api
 local numbers = require('clock.numbers')
 
----@class ClockSetupConfig
+---@class Timer
+---@field close fun()
+---@field stop fun()
+---@field start fun(number, number, function)
+
+---@class ClockConfig
 ---@field style 'dark_shadow' | 'default'
 ---@field border string
 
@@ -16,6 +21,10 @@ local numbers = require('clock.numbers')
 
 ---@type Direction
 local direction = { UP = 1, DOWN = 2 }
+
+---@class Clock
+---@field timer Timer?
+local Clock = {}
 
 local PADDING = ' '
 local INNER_PADDING_WIDTH = 2
@@ -46,7 +55,7 @@ local function generate_separator(char_height)
   return separator
 end
 
----@type ClockSetupConfig
+---@type ClockConfig
 local config = {
   style = 'dark_shadow',
   border = 'rounded',
@@ -227,15 +236,11 @@ local update_clock = function(time, win, buf, timer)
   end
 end
 
-local timers = {}
-
----@param deadline number
 ---@param callback fun(userdata, number)
 ---@param stop_condition fun(timer): boolean
-local function start_timer(deadline, callback, stop_condition)
+local function start_timer(callback, stop_condition)
   assert(callback, 'A callback must be passed to a timer')
   local timer = vim.loop.new_timer()
-  timers[timer] = deadline
   timer:start(0, 1000, function()
     if stop_condition(timer) then
       timer:stop()
@@ -283,13 +288,7 @@ local function create_counter(duration, dir)
     local updater = function(t)
       update_clock(getter(deadline, seconds), win, buf, t)
     end
-    local timer = start_timer(deadline, updater, condition)
-    return function()
-      if timer then
-        timer:stop()
-        timer:close()
-      end
-    end
+    return start_timer(updater, condition)
   end)
 end
 
@@ -310,8 +309,6 @@ local function add_clock(clock)
   return true
 end
 
---- @class Clock
-local Clock = {}
 function Clock:new(o)
   o = o or {}
   self.id = next_id()
@@ -325,7 +322,7 @@ end
 function Clock:count_down(duration)
   local exists = add_clock(self)
   if not exists then
-    self.cancel = create_counter(duration, direction.DOWN)
+    self.timer = create_counter(duration, direction.DOWN)
   end
   return self
 end
@@ -336,9 +333,17 @@ end
 function Clock:count_up(duration)
   local exists = add_clock(self)
   if not exists then
-    self.cancel = create_counter(duration, direction.UP)
+    self.timer = create_counter(duration, direction.UP)
   end
   return self
+end
+
+function Clock:cancel()
+  if self.timer ~= nil then
+    self.timer:stop()
+    self.timer:close()
+    self.timer = nil
+  end
 end
 
 M.Clock = Clock
