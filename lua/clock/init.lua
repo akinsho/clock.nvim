@@ -1,5 +1,7 @@
 --- Source of good ASCII numbers
 --- @reference: https://texteditor.com/multiline-text-art/
+--- Handling dates in Lua
+--- @reference: https://www.lua.org/pil/22.1.html
 local M = {}
 local api = vim.api
 local numbers = require('clock.numbers')
