@@ -32,7 +32,15 @@ end}
 local Clock = require('clock').Clock
 local thirty_mins = Clock:new({minutes = 30})
 thirty_mins:count_up() -- thirty_mins:count_down()
+-- cancel early based on a condition
+if my_condition then
+  thirty_mins:cancel()
+end
 ```
+
+### Commands
+
+- `ClockCancelAll` - Does what it says on the tin 😄
 
 ## Feature requests / Issues
 
