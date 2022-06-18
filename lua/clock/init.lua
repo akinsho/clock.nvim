@@ -1,3 +1,5 @@
+--- Source of good ASCII numbers
+--- @reference: https://texteditor.com/multiline-text-art/
 local M = {}
 local api = vim.api
 local numbers = require('clock.numbers')
