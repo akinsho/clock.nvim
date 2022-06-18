@@ -241,11 +241,25 @@ local update_clock = function(time, win, buf, timer)
   end
 end
 
+---@type Timer[]
+local timers = {}
+
+function M.cancel_all()
+  for timer, callback in pairs(timers) do
+    if timer then
+      timer:stop()
+      timer:close()
+      callback()
+    end
+  end
+end
+
 ---@param callback fun(userdata, number)
 ---@param stop_condition fun(timer): boolean
 local function start_timer(callback, stop_condition)
   assert(callback, 'A callback must be passed to a timer')
   local timer = vim.loop.new_timer()
+  timers[timer] = callback
   timer:start(0, 1000, function()
     if stop_condition(timer) then
       timer:stop()
@@ -273,7 +287,7 @@ end
 
 ---@param duration Duration
 ---@param dir Direction
----@return fun(userdata)
+---@return Timer
 local function create_counter(duration, dir)
   vim.schedule(function()
     local is_counting_up = dir == direction.UP
@@ -356,5 +370,9 @@ M.Clock = Clock
 function M.setup(c)
   config = vim.tbl_deep_extend('force', config, c)
 end
+
+api.nvim_create_user_command('ClockCancelAll', function()
+  M.cancel_all()
+end, { desc = 'Cancel all running clocks', force = true })
 
 return M
