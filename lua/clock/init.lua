@@ -33,6 +33,7 @@ local Clock = {}
 
 local PADDING = ' '
 local INNER_PADDING_WIDTH = 2
+local NAMESPACE = api.nvim_create_namespace('clock-space')
 
 local chars = {
   [1] = '█',
@@ -45,16 +46,11 @@ local function generate_separator(char_height)
   local SIDE_PADDING = #PADDING * 3 -- 3 columns of padding
   local sep_size = (api.nvim_strwidth(chars[1]) * 2) + SIDE_PADDING
   local block = string.rep(PADDING, sep_size)
-  local separator = {
-    block,
-    PADDING .. chars[1]:rep(2) .. PADDING:rep(2),
-    block,
-    PADDING .. chars[1]:rep(2) .. PADDING:rep(2),
-    block,
-  }
+  local separator_dot = PADDING .. chars[1]:rep(2) .. PADDING:rep(2)
+  local separator = { block, separator_dot, block, separator_dot, block }
   if #separator < char_height then
-    for i = #separator, char_height, 1 do
-      separator[i + 1] = block
+    for i = #separator + 1, char_height, 1 do
+      separator[i] = block
     end
   end
   return separator
@@ -73,13 +69,14 @@ local config = {
 
 ---@param opts JoinOpts
 ---@return string[]
-local join = function(opts)
+local function join(opts)
   local after, list, before = opts.after or {}, opts.list or {}, opts.before or {}
   local result = {}
   for index, item in ipairs(list) do
     local before_item = before[index] or ''
     local after_item = after[index] or ''
-    table.insert(result, before_item .. item .. after_item)
+    local line = before_item .. item .. after_item
+    result[#result + 1] = line
   end
   return result
 end
@@ -99,33 +96,71 @@ local str_to_time_parts = function(time)
 end
 
 ---Converts a string into an array of said string `size` number of times
----@param str string
+---@generic T
+---@param arg T
 ---@param size number
 ---@return string[]
-local function expand(str, size)
+local function expand(arg, size)
   local res = {}
   for _ = 1, size, 1 do
-    res[#res + 1] = str
+    res[#res + 1] = arg
   end
   return res
 end
 
---- Calculate approximately how width the clock will be per style
+---@class CharacterAttributes
+---@field height number
+---@field width number
+---@field byte_width number
+
+---@param char string[]
+---@return CharacterAttributes
+local function get_dimensions(char)
+  local char_width, byte_width = 0, 0
+  for _, line in ipairs(char) do
+    local current = api.nvim_strwidth(line)
+    local bytes = #line
+    if current > char_width or bytes > byte_width then
+      char_width = current
+      byte_width = bytes
+    end
+  end
+  return { width = char_width, byte_width = byte_width, height = #char }
+end
+
+---@return CharacterAttributes
+local function get_char_dimensions()
+  local nums = numbers[config.style]
+  local first_char = split(nums[1])
+  return get_dimensions(first_char)
+end
+
+local function get_separator_dimensions(height)
+  return get_dimensions(generate_separator(height))
+end
+
+---Calculate approximately how width the clock will be per style
+---@param char_attrs CharacterAttributes
 ---@return number clock width
----@return number character width
-local function get_clock_width()
+local function get_clock_width(char_attrs, sep_width)
   local NUM_OF_CHARS = 6
   local NUM_OF_SEPARATORS = 2
   local NUM_OF_PADDING_COLUMNS = 5
-  local nums = numbers[config.style]
-  local first_char = split(nums[1])
-  local sep = generate_separator(#first_char)
-  local char_width = api.nvim_strwidth(first_char[1])
-  local sep_width = api.nvim_strwidth(sep[1])
-  local clock_width = (char_width * NUM_OF_CHARS)
+  local clock_width = (char_attrs.width * NUM_OF_CHARS)
     + (sep_width * NUM_OF_SEPARATORS)
     + (NUM_OF_PADDING_COLUMNS * INNER_PADDING_WIDTH)
-  return clock_width, char_width
+  return clock_width, sep_width
+end
+
+---@param offset number[]
+---@param lines string[]
+---@return number[]
+local function get_col_widths(offset, lines)
+  local res = {}
+  for i, line in ipairs(lines) do
+    res[#res + 1] = offset[i] + #line
+  end
+  return res
 end
 
 --- Takes a time represented as HH:MM and returns a list of lines to render in the buffer
@@ -136,48 +171,99 @@ local function get_lines(time, width)
   local nums = numbers[config.style]
 
   local h1, h2, m1, m2, s1, s2 = str_to_time_parts(time)
-  local hour1 = split(nums[h1 + 1])
-  local clock_width, char_width = get_clock_width()
-  local sep = generate_separator(#hour1)
-  local inner_padding = expand(PADDING:rep(INNER_PADDING_WIDTH), char_width)
+  local char_attrs = get_char_dimensions()
+  local sep_attrs = get_separator_dimensions(char_attrs.height)
+  local clock_width = get_clock_width(char_attrs, sep_attrs.width)
+  local sep = generate_separator(char_attrs.height)
+  local inner_padding_char = PADDING:rep(INNER_PADDING_WIDTH)
+  local inner_padding = expand(inner_padding_char, char_attrs.height)
   local available_space = width - clock_width
   local side_size = math.floor(available_space / 2)
 
+  local side_padding_char = PADDING:rep(side_size)
   ---@type string[]
-  local side_padding = expand(PADDING:rep(side_size), char_width)
+  local side_padding = expand(side_padding_char, char_attrs.height)
+
+  local start_row = 1
+  local end_row = char_attrs.height
 
   local h1_lines = join({
     before = side_padding,
-    list = hour1,
+    list = split(nums[h1 + 1]),
     after = inner_padding,
   })
+
+  local start_col = expand(0, char_attrs.height)
+  local h1_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = get_col_widths(start_col, side_padding),
+    end_col = get_col_widths(start_col, h1_lines),
+  }
 
   local h2_lines = join({
     list = split(nums[h2 + 1]),
     after = inner_padding,
   })
 
+  local h2_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = h1_coordinates.end_col,
+    end_col = get_col_widths(h1_coordinates.end_col, h2_lines),
+  }
+
+  local sep_lines = join({ list = sep })
+  local sep1_offset = get_col_widths(h2_coordinates.end_col, sep_lines)
+
   local m1_lines = join({
-    before = sep,
     list = split(nums[m1 + 1]),
     after = inner_padding,
   })
+
+  local m1_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = sep1_offset,
+    end_col = get_col_widths(sep1_offset, m1_lines),
+  }
 
   local m2_lines = join({
     list = split(nums[m2 + 1]),
     after = inner_padding,
   })
 
+  local m2_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = m1_coordinates.end_col,
+    end_col = get_col_widths(m1_coordinates.end_col, m2_lines),
+  }
+
   local s1_lines = join({
-    before = sep,
     list = split(nums[s1 + 1]),
     after = inner_padding,
   })
+
+  local sep2_offset = get_col_widths(m2_coordinates.end_col, sep_lines)
+  local s1_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = sep2_offset,
+    end_col = get_col_widths(sep2_offset, s1_lines),
+  }
 
   local s2_lines = join({
     list = split(nums[s2 + 1]),
     after = side_padding,
   })
+
+  local s2_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = s1_coordinates.end_col,
+    end_col = get_col_widths(s1_coordinates.end_col, s2_lines),
+  }
 
   local result = {}
   for i, _ in ipairs(h1_lines) do
@@ -186,14 +272,47 @@ local function get_lines(time, width)
       table.concat({
         h1_lines[i],
         h2_lines[i],
+        sep_lines[i],
         m1_lines[i],
         m2_lines[i],
+        sep_lines[i],
         s1_lines[i],
         s2_lines[i],
       })
     )
   end
-  return result
+
+  local coordinates = {
+    h1 = h1_coordinates,
+    h2 = h2_coordinates,
+    m1 = m1_coordinates,
+    m2 = m2_coordinates,
+    s1 = s1_coordinates,
+    s2 = s2_coordinates,
+  }
+
+  return result, coordinates
+end
+
+local section_hl = {
+  h1 = 'String',
+  h2 = 'ErrorMsg',
+}
+
+local function highlight_characters(coordinates, buf)
+  for key, coords in pairs(coordinates) do
+    local hl = section_hl[key] or 'String'
+    for index = coords.start_row, coords.end_row, 1 do
+      api.nvim_buf_add_highlight(
+        buf,
+        NAMESPACE,
+        hl,
+        index - 1,
+        coords.start_col[index],
+        coords.end_col[index]
+      )
+    end
+  end
 end
 
 --- Create a clock window
@@ -202,9 +321,11 @@ end
 ---@return number window
 ---@return number buf
 local draw_clock = function(time, conf)
-  local width = get_clock_width() + 10
+  local char_attrs = get_char_dimensions()
+  local sep_attrs = get_separator_dimensions(char_attrs.height)
+  local width = get_clock_width(char_attrs, sep_attrs.width) + 10
   local buf = api.nvim_create_buf(false, true)
-  local lines = get_lines(time, width)
+  local lines, coordinates = get_lines(time, width)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   local win = api.nvim_open_win(buf, false, {
     relative = 'editor',
@@ -216,6 +337,7 @@ local draw_clock = function(time, conf)
     width = width,
     style = 'minimal',
   })
+  highlight_characters(coordinates, buf)
   return win, buf
 end
 
@@ -236,8 +358,9 @@ local update_clock = function(time, win, buf, timer)
   else
     ---@type table
     local win_config = api.nvim_win_get_config(win)
-    local lines = get_lines(time, win_config.width)
+    local lines, coordinates = get_lines(time, win_config.width)
     api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    highlight_characters(coordinates, buf)
   end
 end
 
