@@ -30,12 +30,18 @@ end}
 
 ```lua
 local Clock = require('clock').Clock
-local thirty_mins = Clock:new({minutes = 30})
-thirty_mins:count_up() -- thirty_mins:count_down()
+local thirty_mins = Clock:new()
+thirty_mins:count_up({duration = {minutes = 30}}) -- thirty_mins:count_down()
 -- cancel early based on a condition
 if my_condition then
   thirty_mins:cancel()
 end
+
+--- Thresholds will change the highlight of the clock if they are breached e.g.
+thirty_mins:count_down({
+  duration = {minutes = 30},
+  threshold = {late = "00:15"}, -- at 15mins the clock will become red
+})
 ```
 
 ### Commands
