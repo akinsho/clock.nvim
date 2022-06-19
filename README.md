@@ -3,7 +3,8 @@
 A fairly simple plugin that allows creating timers and clocks to count up and down.
 My main motivation for creating this was so that I could keep track of how much time I spend in my dotfiles... 😅
 
-<img width="1716" alt="image" src="https://user-images.githubusercontent.com/22454918/174431720-90e712bf-90ac-4d9e-ad0b-00d2222c29c1.png">
+https://user-images.githubusercontent.com/22454918/174477979-13643598-8099-47d5-b0b4-63518541e67d.mov
+
 
 ## Status
 
