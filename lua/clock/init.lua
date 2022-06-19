@@ -5,7 +5,15 @@
 
 local M = {}
 local api = vim.api
+local notify = vim.notify
+local once = vim.notify_once
 local numbers = require('clock.numbers')
+
+---@class Coordinates
+---@field start_row number
+---@field end_row number
+---@field start_col number[]
+---@field end_col number[]
 
 ---@class Timer
 ---@field close fun()
@@ -20,6 +28,10 @@ local numbers = require('clock.numbers')
 ---@field hours number
 ---@field minutes number
 
+---@class CountOpts
+---@field duration Duration
+---@field threshold Threshold
+
 ---@class Direction
 ---@field UP 1
 ---@field DOWN 2
@@ -27,13 +39,17 @@ local numbers = require('clock.numbers')
 ---@type Direction
 local direction = { UP = 1, DOWN = 2 }
 
+---@alias Threshold table<string, string>
+
 ---@class Clock
 ---@field timer Timer?
+---@field threshold Threshold
 local Clock = {}
 
 local PADDING = ' '
 local INNER_PADDING_WIDTH = 2
 local NAMESPACE = api.nvim_create_namespace('clock-space')
+local NOTIFICATION_TITLE = ' Clock.nvim'
 
 local chars = {
   [1] = '█',
@@ -295,13 +311,30 @@ local function get_lines(time, width)
 end
 
 local section_hl = {
-  h1 = 'String',
-  h2 = 'ErrorMsg',
+  default = {
+    h1 = 'String',
+    h2 = 'String',
+    m1 = 'String',
+    m2 = 'String',
+    s1 = 'String',
+    s2 = 'String',
+  },
+  late = {
+    h1 = 'ErrorMsg',
+    h2 = 'ErrorMsg',
+    m1 = 'ErrorMsg',
+    m2 = 'ErrorMsg',
+    s1 = 'ErrorMsg',
+    s2 = 'ErrorMsg',
+  },
 }
 
-local function highlight_characters(coordinates, buf)
+---@param buf number
+---@param coordinates Coordinates
+---@param threshold string
+local function highlight_characters(buf, coordinates, threshold)
   for key, coords in pairs(coordinates) do
-    local hl = section_hl[key] or 'String'
+    local hl = section_hl[threshold][key]
     for index = coords.start_row, coords.end_row, 1 do
       api.nvim_buf_add_highlight(
         buf,
@@ -315,12 +348,54 @@ local function highlight_characters(coordinates, buf)
   end
 end
 
+---@param time string
+---@return number
+local function str_to_timestamp(time)
+  local hour, minute, second = time:match('(%d+):(%d+):(%d+)')
+  local today = os.date('!*t')
+  local timestamp = os.time({
+    year = today.year,
+    month = today.month,
+    day = today.day,
+    hour = tonumber(hour),
+    min = tonumber(minute),
+    sec = tonumber(second),
+  })
+  return timestamp
+end
+
+-- Get the current threshold which is one a users threshold which are times which convey a meaning
+-- for them e.g. the threshold could be the point where something is late in a timer e.g. 5mins to
+-- the end. Each threshold should correspond to a highlight which is then used to change the clocks
+-- appearance
+---@param time string
+---@param user_thresholds Threshold
+local function get_curr_threshold(time, user_thresholds)
+  local threshold = 'default'
+  local curr_timestamp = str_to_timestamp(time)
+  if not threshold then
+    return threshold
+  end
+  for name, str in pairs(user_thresholds) do
+    local t = str_to_timestamp(str)
+    local next_threshold = next(user_thresholds, name)
+    local next_time = next_threshold and str_to_timestamp(next_threshold) or nil
+    if curr_timestamp >= t and (not next_time or curr_timestamp <= next_time) then
+      threshold = name
+      break
+    end
+  end
+  return threshold
+end
+
 --- Create a clock window
 ---@param time string
+---@param user_thresholds Threshold
 ---@param conf table
 ---@return number window
 ---@return number buf
-local draw_clock = function(time, conf)
+local function draw_clock(time, user_thresholds, conf)
+  local threshold = get_curr_threshold(time, user_thresholds)
   local char_attrs = get_char_dimensions()
   local sep_attrs = get_separator_dimensions(char_attrs.height)
   local width = get_clock_width(char_attrs, sep_attrs.width) + 10
@@ -337,7 +412,7 @@ local draw_clock = function(time, conf)
     width = width,
     style = 'minimal',
   })
-  highlight_characters(coordinates, buf)
+  highlight_characters(buf, coordinates, threshold)
   return win, buf
 end
 
@@ -345,11 +420,12 @@ end
 ---@param time string
 ---@param win number
 ---@param buf number
----@param timer userdata
-local update_clock = function(time, win, buf, timer)
+---@param timer Timer
+---@param threshold Threshold
+local function update_clock(win, buf, time, timer, threshold)
   if not api.nvim_win_is_valid(win) then
-    return vim.notify_once('Window is invalid! cannot update the time', 'error', {
-      title = 'Clock.nvim',
+    return once('Window is invalid! cannot update the time', 'error', {
+      title = NOTIFICATION_TITLE,
     })
   end
   if not timer then
@@ -360,7 +436,7 @@ local update_clock = function(time, win, buf, timer)
     local win_config = api.nvim_win_get_config(win)
     local lines, coordinates = get_lines(time, win_config.width)
     api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    highlight_characters(coordinates, buf)
+    highlight_characters(buf, coordinates, get_curr_threshold(time, threshold))
   end
 end
 
@@ -408,17 +484,24 @@ local function countup(end_time, duration)
   return os.date('!%X', (os.time() + duration) - end_time)
 end
 
----@param duration Duration
+---@param opts CountOpts
 ---@param dir Direction
+---@param _ Clock
 ---@return Timer
-local function create_counter(duration, dir)
+local function create_counter(opts, dir, _)
   vim.schedule(function()
     local is_counting_up = dir == direction.UP
+    local duration = opts.duration
+    if not opts.duration then
+      return notify('A clock cannot be started without a duration', 'error', {
+        title = NOTIFICATION_TITLE,
+      })
+    end
     local minutes = duration.minutes or 0
     local hours = duration.hours or 0
     local seconds = (minutes * 60) + (hours * 60 * 60)
     local start_time = '00:00:00'
-    local win, buf = draw_clock(start_time, config)
+    local win, buf = draw_clock(start_time, opts.threshold, config)
     local deadline = seconds + os.time()
     local getter = is_counting_up and countup or countdown
     local condition = function(_)
@@ -428,7 +511,7 @@ local function create_counter(duration, dir)
       return deadline <= os.time()
     end
     local updater = function(t)
-      update_clock(getter(deadline, seconds), win, buf, t)
+      update_clock(win, buf, getter(deadline, seconds), t, opts.threshold)
     end
     return start_timer(updater, condition)
   end)
@@ -459,23 +542,23 @@ function Clock:new(o)
 end
 
 ---Countdown for the amount of time specified
----@param duration Duration
+---@param opts CountOpts
 ---@return Clock
-function Clock:count_down(duration)
+function Clock:count_down(opts)
   local exists = add_clock(self)
   if not exists then
-    self.timer = create_counter(duration, direction.DOWN)
+    self.timer = create_counter(opts, direction.DOWN, self)
   end
   return self
 end
 
 ---Count up for the amount of time specified
----@param duration Duration
+---@param opts CountOpts
 ---@return Clock
-function Clock:count_up(duration)
+function Clock:count_up(opts)
   local exists = add_clock(self)
   if not exists then
-    self.timer = create_counter(duration, direction.UP)
+    self.timer = create_counter(opts, direction.UP, self)
   end
   return self
 end
