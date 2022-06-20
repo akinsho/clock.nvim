@@ -231,6 +231,12 @@ local function get_lines(time, width)
 
   local sep_lines = join({ list = sep })
   local sep1_offset = get_col_widths(h2_coordinates.end_col, sep_lines)
+  local sep1_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = h2_coordinates.end_col,
+    end_col = sep1_offset,
+  }
 
   local m1_lines = join({
     list = split(nums[m1 + 1]),
@@ -262,6 +268,13 @@ local function get_lines(time, width)
   })
 
   local sep2_offset = get_col_widths(m2_coordinates.end_col, sep_lines)
+  local sep2_coordinates = {
+    start_row = start_row,
+    end_row = end_row,
+    start_col = m2_coordinates.end_col,
+    end_col = sep2_offset,
+  }
+
   local s1_coordinates = {
     start_row = start_row,
     end_row = end_row,
@@ -301,8 +314,10 @@ local function get_lines(time, width)
   local coordinates = {
     h1 = h1_coordinates,
     h2 = h2_coordinates,
+    sep1 = sep1_coordinates,
     m1 = m1_coordinates,
     m2 = m2_coordinates,
+    sep2 = sep2_coordinates,
     s1 = s1_coordinates,
     s2 = s2_coordinates,
   }
@@ -314,16 +329,20 @@ local section_hl = {
   default = {
     h1 = 'String',
     h2 = 'String',
+    sep1 = 'NonText',
     m1 = 'String',
     m2 = 'String',
+    sep2 = 'NonText',
     s1 = 'String',
     s2 = 'String',
   },
   late = {
     h1 = 'ErrorMsg',
     h2 = 'ErrorMsg',
+    sep1 = 'NonText',
     m1 = 'ErrorMsg',
     m2 = 'ErrorMsg',
+    sep2 = 'NonText',
     s1 = 'ErrorMsg',
     s2 = 'ErrorMsg',
   },
