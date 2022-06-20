@@ -424,10 +424,10 @@ local function draw_clock(time, user_thresholds, conf)
   local win = api.nvim_open_win(buf, false, {
     relative = 'editor',
     anchor = 'SE',
-    row = vim.o.lines - tonumber(vim.o.cmdheight) - 1 - 1,
-    col = vim.o.columns,
+    row = conf.row or vim.o.lines - tonumber(vim.o.cmdheight) - 1 - 1,
+    col = conf.col or vim.o.columns,
     border = conf.border,
-    height = conf.height or #lines,
+    height = #lines - 1,
     width = width,
     style = 'minimal',
   })
