@@ -157,7 +157,7 @@ end
 
 ---Calculate approximately how width the clock will be per style
 ---@param char_attrs CharacterAttributes
----@return number clock width
+---@return number, number
 local function get_clock_width(char_attrs, sep_width)
   local NUM_OF_CHARS = 6
   local NUM_OF_SEPARATORS = 2
@@ -182,7 +182,7 @@ end
 --- Takes a time represented as HH:MM and returns a list of lines to render in the buffer
 ---@param time string
 ---@param width number
----@return string[]
+---@return string[], table<string, table>
 local function get_lines(time, width)
   local nums = numbers[config.style]
 
@@ -436,30 +436,34 @@ local function draw_clock(time, user_thresholds, conf)
 end
 
 --- Set a new time in an existing clock buffer
----@param time string
+---@param time string | osdate
 ---@param win number
 ---@param buf number
 ---@param timer Timer
 ---@param threshold Threshold
 local function update_clock(win, buf, time, timer, threshold)
-  if not api.nvim_win_is_valid(win) then
-    return once('Window is invalid! cannot update the time', 'error', {
-      title = NOTIFICATION_TITLE,
-    })
-  end
-  if not timer then
-    api.nvim_win_close(win, true)
-    api.nvim_buf_delete(buf, { force = true })
-  else
-    ---@type table
-    local win_config = api.nvim_win_get_config(win)
-    local lines, coordinates = get_lines(time, win_config.width)
-    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    highlight_characters(buf, coordinates, get_curr_threshold(time, threshold))
-  end
+  vim.schedule(function()
+    if not api.nvim_win_is_valid(win) then
+      return once('Window is invalid! cannot update the time', 'error', {
+        title = NOTIFICATION_TITLE,
+      })
+    end
+    if not timer then
+      api.nvim_win_close(win, true)
+      api.nvim_buf_delete(buf, { force = true })
+    else
+      ---@type table
+      local win_config = api.nvim_win_get_config(win)
+      if type(time) == "string" then
+        local lines, coordinates = get_lines(time, win_config.width)
+        api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        highlight_characters(buf, coordinates, get_curr_threshold(time, threshold))
+      end
+    end
+  end)
 end
 
----@type Timer[]
+---@type table<Timer, fun(userdata, number)>
 local timers = {}
 
 function M.cancel_all()
@@ -474,7 +478,7 @@ end
 
 ---@param callback fun(userdata, number)
 ---@param stop_condition fun(timer): boolean
-local function start_timer(callback, stop_condition)
+local function start_timer(stop_condition, callback)
   assert(callback, 'A callback must be passed to a timer')
   local timer = vim.loop.new_timer()
   timers[timer] = callback
@@ -493,8 +497,8 @@ end
 --- Return the difference between the time when the timer ends and the current time
 -- `!` means UTC and `%X` returns the time as `HH:MM`
 -- @see: https://www.lua.org/pil/22.1.html
----@param end_time number time when the timer ends in seconds
----@return number difference between now and the end time
+---@param end_time integer time when the timer ends in seconds
+---@return string | osdate difference between now and the end time
 local function countdown(end_time)
   return os.date('!%X', end_time - os.time())
 end
@@ -504,35 +508,34 @@ local function countup(end_time, duration)
 end
 
 ---@param opts CountOpts
----@param dir Direction
----@param _ Clock
----@return Timer
-local function create_counter(opts, dir, _)
-  vim.schedule(function()
-    local is_counting_up = dir == direction.UP
-    local duration = opts.duration
-    if not opts.duration then
-      return notify('A clock cannot be started without a duration', 'error', {
+---@param dir number
+---@param clock Clock
+---@return Timer?
+local function create_counter(opts, dir, clock)
+  local is_counting_up = dir == direction.UP
+  local duration = opts.duration
+  if not opts.duration then
+    vim.schedule(function()
+      notify('A clock cannot be started without a duration', 'error', {
         title = NOTIFICATION_TITLE,
       })
-    end
-    local minutes = duration.minutes or 0
-    local hours = duration.hours or 0
-    local seconds = (minutes * 60) + (hours * 60 * 60)
-    local start_time = '00:00:00'
+    end)
+    return
+  end
+  local minutes = duration.minutes or 0
+  local hours = duration.hours or 0
+  local seconds = (minutes * 60) + (hours * 60 * 60)
+  local start_time = '00:00:00'
+  vim.schedule(function()
     local win, buf = draw_clock(start_time, opts.threshold, config)
     local deadline = seconds + os.time()
     local getter = is_counting_up and countup or countdown
     local condition = function(_)
-      if is_counting_up then
-        return deadline <= os.time()
-      end
-      return deadline <= os.time()
+      return is_counting_up and deadline <= os.time() or deadline <= os.time()
     end
-    local updater = function(t)
+    clock.timer = start_timer(condition, function(t)
       update_clock(win, buf, getter(deadline, seconds), t, opts.threshold)
-    end
-    return start_timer(updater, condition)
+    end)
   end)
 end
 
@@ -566,7 +569,7 @@ end
 function Clock:count_down(opts)
   local exists = add_clock(self)
   if not exists then
-    self.timer = create_counter(opts, direction.DOWN, self)
+    create_counter(opts, direction.DOWN, self)
   end
   return self
 end
@@ -577,7 +580,7 @@ end
 function Clock:count_up(opts)
   local exists = add_clock(self)
   if not exists then
-    self.timer = create_counter(opts, direction.UP, self)
+    create_counter(opts, direction.UP, self)
   end
   return self
 end
