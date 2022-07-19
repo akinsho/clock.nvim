@@ -411,8 +411,9 @@ end
 ---@param time string
 ---@param user_thresholds Threshold
 ---@param conf table
----@return number window
----@return number buf
+---@return boolean ok
+---@return number? window
+---@return number? buf
 local function draw_clock(time, user_thresholds, conf)
   local threshold = get_curr_threshold(time, user_thresholds)
   local char_attrs = get_char_dimensions()
@@ -421,7 +422,7 @@ local function draw_clock(time, user_thresholds, conf)
   local buf = api.nvim_create_buf(false, true)
   local lines, coordinates = get_lines(time, width)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  local win = api.nvim_open_win(buf, false, {
+  local ok, win = pcall(api.nvim_open_win, buf, false, {
     relative = 'editor',
     anchor = 'SE',
     row = conf.row or vim.o.lines - tonumber(vim.o.cmdheight) - 1 - 1,
@@ -431,8 +432,9 @@ local function draw_clock(time, user_thresholds, conf)
     width = width,
     style = 'minimal',
   })
+  if not ok then return false end
   highlight_characters(buf, coordinates, threshold)
-  return win, buf
+  return true, win, buf
 end
 
 --- Set a new time in an existing clock buffer
@@ -527,7 +529,8 @@ local function create_counter(opts, dir, clock)
   local seconds = (minutes * 60) + (hours * 60 * 60)
   local start_time = '00:00:00'
   vim.schedule(function()
-    local win, buf = draw_clock(start_time, opts.threshold, config)
+    local ok, win, buf = draw_clock(start_time, opts.threshold, config)
+    if not ok or not win or not buf then return end
     local deadline = seconds + os.time()
     local getter = is_counting_up and countup or countdown
     local condition = function(_)
